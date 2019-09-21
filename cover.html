@@ -54,7 +54,7 @@
 			<div id="nav">
 				<select id="files">
 				
-				<option value="file0">go-server-test-coverage/client.go (57.1%)</option>
+				<option value="file0">go-server-test-coverage/client.go (81.0%)</option>
 				
 				</select>
 			</div>
@@ -138,13 +138,13 @@ func (srv *SearchClient) FindUsers(req SearchRequest) (*SearchResponse, error) <
 
         searcherParams := url.Values{}
 
-        if req.Limit &lt; 0 </span><span class="cov0" title="0">{
+        if req.Limit &lt; 0 </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("limit must be &gt; 0")
         }</span>
-        <span class="cov8" title="1">if req.Limit &gt; 25 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if req.Limit &gt; 25 </span><span class="cov8" title="1">{
                 req.Limit = 25
         }</span>
-        <span class="cov8" title="1">if req.Offset &lt; 0 </span><span class="cov0" title="0">{
+        <span class="cov8" title="1">if req.Offset &lt; 0 </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("offset must be &gt; 0")
         }</span>
 
@@ -161,19 +161,19 @@ func (srv *SearchClient) FindUsers(req SearchRequest) (*SearchResponse, error) <
         searcherReq.Header.Add("AccessToken", srv.AccessToken)
         
         resp, err := client.Do(searcherReq)
-        if err != nil </span><span class="cov0" title="0">{
+        if err != nil </span><span class="cov8" title="1">{
                 if err, ok := err.(net.Error); ok &amp;&amp; err.Timeout() </span><span class="cov0" title="0">{
                         return nil, fmt.Errorf("timeout for %s", searcherParams.Encode())
                 }</span>
-                <span class="cov0" title="0">return nil, fmt.Errorf("unknown error %s", err)</span>
+                <span class="cov8" title="1">return nil, fmt.Errorf("unknown error %s", err)</span>
         }
         <span class="cov8" title="1">defer resp.Body.Close()
         body, err := ioutil.ReadAll(resp.Body)
 
         switch resp.StatusCode </span>{
-        case http.StatusUnauthorized:<span class="cov0" title="0">
+        case http.StatusUnauthorized:<span class="cov8" title="1">
                 return nil, fmt.Errorf("Bad AccessToken")</span>
-        case http.StatusInternalServerError:<span class="cov0" title="0">
+        case http.StatusInternalServerError:<span class="cov8" title="1">
                 return nil, fmt.Errorf("SearchServer fatal error")</span>
         case http.StatusBadRequest:<span class="cov0" title="0">
                 errResp := SearchErrorResponse{}
@@ -189,12 +189,12 @@ func (srv *SearchClient) FindUsers(req SearchRequest) (*SearchResponse, error) <
 
         <span class="cov8" title="1">data := []User{}
         err = json.Unmarshal(body, &amp;data)
-        if err != nil </span><span class="cov0" title="0">{
+        if err != nil </span><span class="cov8" title="1">{
                 return nil, fmt.Errorf("cant unpack result json: %s", err)
         }</span>
 
         <span class="cov8" title="1">result := SearchResponse{}
-        if len(data) == req.Limit </span><span class="cov0" title="0">{
+        if len(data) == req.Limit </span><span class="cov8" title="1">{
                 result.NextPage = true
                 result.Users = data[0 : len(data)-1]
         }</span> else<span class="cov8" title="1"> {

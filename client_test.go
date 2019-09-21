@@ -2,10 +2,10 @@ package main
 
 import (
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,10 +74,13 @@ func filterUsers(users []User, params *SearchRequest) []User {
 		return users
 	}
 
-	filteredUsers := make([]User, 0, params.Limit)
+	filteredUsers := make([]User, 0, 10)
 
 	isLegit := func(user User) bool {
-		if strings.Contains(user.About, params.Query) || strings.Contains(user.Name, params.Query) {
+		about := strings.ToLower(user.About)
+		name := strings.ToLower(user.Name)
+		query := strings.ToLower(params.Query)
+		if strings.Contains(about, query) || strings.Contains(name, query) {
 			return true
 		}
 		return false
@@ -86,9 +89,6 @@ func filterUsers(users []User, params *SearchRequest) []User {
 	for _, user := range users {
 		if isLegit(user) {
 			filteredUsers = append(filteredUsers, user)
-			if len(filteredUsers) == params.Limit {
-				break
-			}
 		}
 	}
 
@@ -148,20 +148,47 @@ func offsetUsers(users []User, params *SearchRequest) []User {
 
 }
 
-func getSearchParams(r *http.Request) (*SearchRequest, error) {
+func limitUsers(users []User, params *SearchRequest) []User {
+	fmt.Println(len(users))
+	fmt.Println(params.Limit)
+	if params.Limit > len(users) {
+		return users
+	}
+	return users[0:params.Limit]
+}
+
+func getSearchParams(w http.ResponseWriter, r *http.Request) (*SearchRequest, error) {
 	qp := r.URL.Query()
 
-	limit, err1 := strconv.Atoi(qp.Get("limit"))
-	offset, err2 := strconv.Atoi(qp.Get("offset"))
-	orderBy, err3 := strconv.Atoi(qp.Get("order_by"))
-	orderField := qp.Get("order_field")
-
-	if err1 != nil || err2 != nil || err3 != nil {
-		return nil, errors.New("Invalid params")
+	limit, err := strconv.Atoi(qp.Get("limit"))
+	if err != nil {
+		http.Error(w, "invalid params", http.StatusInternalServerError)
+		return nil, err
 	}
 
-	if orderField != "id" && orderField != "age" && orderField != "name" {
-		return nil, errors.New("Invalid params")
+	offset, err := strconv.Atoi(qp.Get("offset"))
+	if err != nil {
+		http.Error(w, "invalid params", http.StatusInternalServerError)
+		return nil, err
+	}
+
+	orderBy, err := strconv.Atoi(qp.Get("order_by"))
+	if err != nil {
+		http.Error(w, "invalid params", http.StatusInternalServerError)
+		return nil, err
+	}
+
+	orderField := qp.Get("order_field")
+
+	if orderField != "id" && orderField != "age" && orderField != "name" && orderField != "" {
+		searchError := SearchErrorResponse{Error: "ErrorBadOrderField"}
+		searchErrorJson, err := json.Marshal(searchError)
+		if err != nil {
+			return nil, err
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write(searchErrorJson)
+		return nil, err
 	}
 
 	params := &SearchRequest{
@@ -176,32 +203,39 @@ func getSearchParams(r *http.Request) (*SearchRequest, error) {
 }
 
 func printUsers(users []User) {
+	fmt.Println(".............")
 	for _, user := range users {
 		fmt.Println(user.Name)
 	}
+	fmt.Println(",,,")
 }
 
 func SearchServer(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("AccessToken") == "" {
+		http.Error(w, "Error connecting to the DB.", http.StatusUnauthorized)
+		return
+	}
+
 	users, err := getUsersFromFile()
 	if err != nil {
 		http.Error(w, "Error connecting to the DB.", http.StatusInternalServerError)
 		return
 	}
 
-	params, err := getSearchParams(r)
+	params, err := getSearchParams(w, r)
 	if err != nil {
-		http.Error(w, "Invalid params", http.StatusBadRequest)
 		return
 	}
+
+	fmt.Println("HERE")
 
 	filteredUsers := filterUsers(users, params)
 	orderedUsers := sortUsers(filteredUsers, params)
 	offsetUsers := offsetUsers(orderedUsers, params)
-
-	printUsers(offsetUsers)
+	limitedUsers := limitUsers(offsetUsers, params)
 
 	w.WriteHeader(200)
-	result, _ := json.Marshal(offsetUsers)
+	result, _ := json.Marshal(limitedUsers)
 	w.Write(result)
 }
 
@@ -221,27 +255,23 @@ func TestFindUsers(t *testing.T) {
 			Limit:      limit,
 			Offset:     0,
 			Query:      "",
-			OrderField: "id",
+			OrderField: "",
 			OrderBy:    0,
 		}
 
-		res, err := searchClient.FindUsers(req)
+		res, _ := searchClient.FindUsers(req)
 
-		if err != nil {
-			fmt.Println(err)
-			t.Errorf("Should not have error")
-			return
-		}
-		if res.NextPage {
-			t.Errorf("There should be no next page")
-		}
 		if len(res.Users) != limit {
 			t.Errorf("The length should be 5")
 		}
+		if !res.NextPage {
+			t.Errorf("There should be no next page")
+		}
+
 		//if !reflect.DeepEqual(res.Users, users) {
 		//	t.Errorf("Users should be equals")
 		//}
-		//fmt.Println(res.Users)
+		//printUsers(res.Users)
 	})
 
 	t.Run("incorrect limit in search request", func(t *testing.T) {
@@ -249,7 +279,7 @@ func TestFindUsers(t *testing.T) {
 			Limit:      -1,
 			Offset:     0,
 			Query:      "",
-			OrderField: "id",
+			OrderField: "",
 			OrderBy:    0,
 		}
 
@@ -262,4 +292,190 @@ func TestFindUsers(t *testing.T) {
 		}
 	})
 
+	t.Run("incorrect offset in search request", func(t *testing.T) {
+		req := SearchRequest{
+			Limit:      5,
+			Offset:     -1,
+			Query:      "",
+			OrderField: "",
+			OrderBy:    0,
+		}
+
+		_, err := searchClient.FindUsers(req)
+
+		if err == nil {
+			fmt.Println(err)
+			t.Errorf("Should trigger error")
+			return
+		}
+	})
+
+	t.Run("big limit in search request", func(t *testing.T) {
+		req := SearchRequest{
+			Limit:      45,
+			Offset:     0,
+			Query:      "",
+			OrderField: "",
+			OrderBy:    0,
+		}
+
+		res, _ := searchClient.FindUsers(req)
+
+		// TODO: should be global variable
+		if len(res.Users) != 25 {
+			t.Errorf("The length should be 25")
+		}
+	})
+
+	t.Run("offset works", func(t *testing.T) {
+		req1 := SearchRequest{
+			Limit:      5,
+			Offset:     0,
+			Query:      "",
+			OrderField: "",
+			OrderBy:    0,
+		}
+		res1, _ := searchClient.FindUsers(req1)
+
+		req2 := SearchRequest{
+			Limit:      3,
+			Offset:     2,
+			Query:      "",
+			OrderField: "",
+			OrderBy:    0,
+		}
+		res2, _ := searchClient.FindUsers(req2)
+
+		if !reflect.DeepEqual(res1.Users[2:], res2.Users) {
+			t.Errorf("Should be equal")
+		}
+	})
+
+	t.Run("test next page", func(t *testing.T) {
+		req := SearchRequest{
+			Limit:      25,
+			Offset:     0,
+			Query:      "nn",
+			OrderField: "",
+			OrderBy:    0,
+		}
+
+		res, _ := searchClient.FindUsers(req)
+
+		if res.NextPage {
+			t.Errorf("Should not have next page")
+		}
+	})
+
+	//t.Run("test bad request response", func(t *testing.T) {
+	//	req := SearchRequest{
+	//		Limit:      5,
+	//		Offset:     0,
+	//		Query:      "",
+	//		OrderField: "xxx",
+	//		OrderBy:    0,
+	//	}
+	//
+	//	_, err := searchClient.FindUsers(req)
+	//
+	//	if err == nil {
+	//		t.Errorf("Should result in error")
+	//	}
+	//})
+
+	t.Run("test access token", func(t *testing.T) {
+		searchClient := &SearchClient{
+			AccessToken: "",
+			URL:         ts.URL,
+		}
+
+		req := SearchRequest{
+			Limit:      3,
+			Offset:     2,
+			Query:      "nn",
+			OrderField: "name",
+			OrderBy:    1,
+		}
+
+		_, err := searchClient.FindUsers(req)
+
+		if err == nil {
+			t.Errorf("Should result in error")
+		}
+	})
+
+	t.Run("test url", func(t *testing.T) {
+		searchClient := &SearchClient{
+			AccessToken: "password",
+			URL:         "",
+		}
+
+		req := SearchRequest{
+			Limit:      3,
+			Offset:     2,
+			Query:      "nn",
+			OrderField: "name",
+			OrderBy:    1,
+		}
+
+		_, err := searchClient.FindUsers(req)
+
+		if err == nil {
+			t.Errorf("Should result in error")
+		}
+	})
+
+	t.Run("test not json response", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			w.Write([]byte("Hello"))
+		}))
+		defer ts.Close()
+
+		searchClient := &SearchClient{
+			AccessToken: "password",
+			URL:         ts.URL,
+		}
+
+		req := SearchRequest{
+			Limit:      3,
+			Offset:     2,
+			Query:      "nn",
+			OrderField: "name",
+			OrderBy:    1,
+		}
+
+		_, err := searchClient.FindUsers(req)
+
+		if err == nil {
+			t.Errorf("Should result in error")
+		}
+	})
+
+	t.Run("test fatal response", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Something happened"))
+		}))
+		defer ts.Close()
+
+		searchClient := &SearchClient{
+			AccessToken: "password",
+			URL:         ts.URL,
+		}
+
+		req := SearchRequest{
+			Limit:      3,
+			Offset:     2,
+			Query:      "nn",
+			OrderField: "name",
+			OrderBy:    1,
+		}
+
+		_, err := searchClient.FindUsers(req)
+
+		if err == nil {
+			t.Errorf("Should result in error")
+		}
+	})
 }
