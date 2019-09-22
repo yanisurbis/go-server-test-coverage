@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"encoding/json"
 	//"fmt"
@@ -503,6 +504,33 @@ func TestFindUsers(t *testing.T) {
 	t.Run("test invalid params error", func(t *testing.T) {
 		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid params", http.StatusBadRequest)
+		}))
+		defer ts.Close()
+
+		searchClient := &SearchClient{
+			AccessToken: "password",
+			URL:         ts.URL,
+		}
+
+		req := SearchRequest{
+			Limit:      3,
+			Offset:     0,
+			Query:      "",
+			OrderField: "",
+			OrderBy:    0,
+		}
+
+		_, err := searchClient.FindUsers(req)
+
+		if err == nil {
+			t.Errorf("Should result in error")
+		}
+	})
+
+	t.Run("check timeout", func(t *testing.T) {
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(200)
+			time.Sleep(2000 * time.Millisecond)
 		}))
 		defer ts.Close()
 
