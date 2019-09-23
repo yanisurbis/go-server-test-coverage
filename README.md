@@ -1,1 +1,2 @@
-hw4_test_coverage
+- task description at `hw4.md`
+- solution at `client_test.go`
